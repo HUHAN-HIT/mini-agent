@@ -1,0 +1,43 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.backends._legacy:_Backend"
+
+[project]
+name = "mini-agent"
+version = "0.1.0"
+description = "A minimal, extensible ReAct agent framework with MCP, Skills, and Memory"
+readme = "README.md"
+requires-python = ">=3.11"
+license = {text = "MIT"}
+
+dependencies = [
+    "langchain-openai>=0.3",
+    "openai>=1.30",
+    "fastmcp>=0.1",
+    "fastapi>=0.110",
+    "uvicorn>=0.29",
+    "sse-starlette>=2.0",
+    "requests>=2.31",
+    "python-dotenv>=1.0",
+    "duckduckgo-search>=6.0",
+    "pyyaml>=6.0",
+    "beautifulsoup4>=4.12",
+    "lxml>=5.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "ruff>=0.4",
+]
+
+[project.scripts]
+mini-agent-mcp = "mini_agent.mcp_server:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["src*"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py311"
