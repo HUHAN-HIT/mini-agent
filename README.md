@@ -1,6 +1,6 @@
 # Mini-Agent
 
-A minimal, extensible ReAct agent framework extracted from [Vibe-Trading](https://github.com/MB-Ndhlovu/Vibe-Trading). Includes MCP server, Skills system, and persistent Memory.
+A minimal, extensible ReAct agent framework. Includes MCP server, Skills system, and persistent Memory.
 
 ## Features
 
@@ -10,7 +10,7 @@ A minimal, extensible ReAct agent framework extracted from [Vibe-Trading](https:
 - **Persistent Memory** — file-based cross-session memory with keyword scoring
 - **MCP Server** — expose tools to Claude Desktop, Cursor, and any MCP client
 - **Session Layer** — filesystem persistence with SSE event bus and SQLite FTS5 search
-- **13 LLM Providers** — OpenAI, DeepSeek, Zhipu, Moonshot, Qwen, Azure, Anthropic, Gemini, Ollama, OpenRouter, SiliconFlow, Groq, and custom
+- **10+ LLM Providers via OpenAI-compatible endpoints** — OpenAI, DeepSeek, Zhipu, Moonshot, Qwen, Gemini, Ollama, OpenRouter, Groq, MiniMax, and custom
 
 ## Quick Start
 
@@ -46,7 +46,7 @@ mini-agent/
 │   │   ├── trace.py     # JSONL trace writer
 │   │   └── frontmatter.py
 │   ├── providers/       # LLM providers
-│   │   ├── llm.py       # Factory for 13 providers
+│   │   ├── llm.py       # Factory for OpenAI-compatible providers
 │   │   └── chat.py      # ChatLLM with stream/chat/async
 │   ├── tools/           # Built-in tools (auto-discovered)
 │   │   ├── read_file_tool.py

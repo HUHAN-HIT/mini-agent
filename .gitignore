@@ -1,3 +1,5 @@
 .venv
 .claude
 .idea/
+.env
+mini_agent.egg-info
