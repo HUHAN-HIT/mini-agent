@@ -1,0 +1,47 @@
+name: research_team
+description: "Parallel web research with synthesis — two searchers + a synthesizer."
+
+variables:
+  topic:
+    required: true
+    description: "Research topic"
+
+agents:
+  - id: tech_searcher
+    role: leaf
+    goal: |
+      Find 5+ recent (2025-2026) technical blog sources about "{{topic}}".
+      For each source, capture: title, URL, and a 2-3 sentence summary of key claims.
+      Prioritize authoritative technical blogs over news aggregators.
+    tools: [web_search, read_url]
+    max_iterations: 12
+
+  - id: official_searcher
+    role: leaf
+    goal: |
+      Find 5+ academic, industry report, or official sources about "{{topic}}".
+      Prefer: Gartner, IDC, McKinsey, official vendor blogs, arXiv papers.
+      For each source, capture: title, URL, and key quantitative data (numbers, percentages, market sizes).
+    tools: [web_search, read_url]
+    max_iterations: 12
+
+  - id: synthesizer
+    role: specialist
+    depends_on: [tech_searcher, official_searcher]
+    input_from: [tech_searcher, official_searcher]
+    goal: |
+      Merge the two research streams into a 400-word brief about "{{topic}}".
+      Structure: (1) Key Findings, (2) Supporting Data, (3) Conflicts/Gaps, (4) Recommended next steps.
+      Cite sources inline as [tech_searcher]/[official_searcher].
+    tools: [read_file, write_file]
+    max_iterations: 10
+
+aggregator:
+  id: report_writer
+  role: specialist
+  goal: |
+    Write the final markdown research report to research.md in the run directory.
+    Sections: Executive Summary, Detailed Findings, Sources, Open Questions.
+    Base it on the synthesizer output; preserve all numbers and citations.
+  tools: [write_file]
+  max_iterations: 8

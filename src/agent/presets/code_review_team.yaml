@@ -1,0 +1,51 @@
+name: code_review_team
+description: "Multi-perspective code review — security, performance, style auditors + aggregator."
+
+variables:
+  target_path:
+    required: true
+    description: "File or directory path to review"
+
+agents:
+  - id: security_auditor
+    role: leaf
+    goal: |
+      Audit "{{target_path}}" for security issues.
+      Focus on OWASP Top 10: injection, broken auth, sensitive data exposure,
+      XXE, broken access control, security misconfiguration, XSS, insecure deserialization,
+      known-vulnerable components, insufficient logging.
+      For each finding: severity (Critical/High/Medium/Low), file:line, description, fix suggestion.
+    tools: [read_file, bash, web_search]
+    max_iterations: 10
+
+  - id: perf_auditor
+    role: leaf
+    goal: |
+      Audit "{{target_path}}" for performance issues.
+      Look for: O(n²) loops, unnecessary allocations, blocking I/O in hot paths,
+      missing indexes (if SQL), N+1 query patterns, memory leaks, inefficient data structures.
+      For each finding: impact estimate, file:line, suggested optimization.
+    tools: [read_file, bash]
+    max_iterations: 10
+
+  - id: style_auditor
+    role: leaf
+    goal: |
+      Audit "{{target_path}}" for style and maintainability issues.
+      Check: naming conventions, function length, duplication, dead code,
+      missing type hints, overly complex functions (cyclomatic complexity),
+      comment quality, adherence to language idioms.
+      For each finding: category, file:line, suggested refactor.
+    tools: [read_file]
+    max_iterations: 8
+
+aggregator:
+  id: reviewer
+  role: specialist
+  goal: |
+    Merge the three audit reports into a prioritized issue list for "{{target_path}}".
+    Output to code_review.md in the run directory.
+    Sections: Critical Issues, High Priority, Medium Priority, Low Priority, Positive Observations.
+    Each issue must cite which auditor flagged it.
+  tools: [write_file]
+  max_iterations: 8

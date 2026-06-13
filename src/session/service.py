@@ -111,6 +111,9 @@ class SessionService:
         from src.tools import build_registry
         from src.providers.chat import ChatLLM
         from src.agent.loop import AgentLoop
+        from src.agent.subagent import SubAgentContext
+        from src.tools.delegate_tool import DelegateTool
+        from src.tools.team_tool import TeamTool
         from src.memory.persistent import PersistentMemory
 
         llm = ChatLLM()
@@ -122,8 +125,15 @@ class SessionService:
             data["attempt_id"] = attempt_id
             self.event_bus.emit(session_id, event_type, data)
 
+        registry = build_registry(persistent_memory=pm)
+        run_dir = self.runs_dir / attempt_id
+        run_dir.mkdir(parents=True, exist_ok=True)
+        parent_ctx = SubAgentContext(depth=0, parent_run_dir=run_dir, parent_session_id=session_id)
+        registry.register(DelegateTool(llm, registry, run_dir, parent_ctx, event_callback))
+        registry.register(TeamTool(llm, registry, run_dir, parent_ctx, event_callback))
+
         agent = AgentLoop(
-            registry=build_registry(persistent_memory=pm),
+            registry=registry,
             llm=llm,
             event_callback=event_callback,
             max_iterations=50,

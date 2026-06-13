@@ -11,13 +11,18 @@ AGENT_DIR = Path(__file__).resolve().parent
 if str(AGENT_DIR) not in sys.path:
     sys.path.insert(0, str(AGENT_DIR))
 
+RUNS_DIR = AGENT_DIR / "runs"
+
 
 def main() -> None:
     from src.agent.loop import AgentLoop
     from src.agent.skills import SkillsLoader
+    from src.agent.subagent import SubAgentContext
     from src.providers.chat import ChatLLM
     from src.memory.persistent import PersistentMemory
     from src.tools import build_registry
+    from src.tools.delegate_tool import DelegateTool
+    from src.tools.team_tool import TeamTool
 
     print("Mini-Agent CLI")
     print("Type your message and press Enter. Type /quit to exit.\n")
@@ -26,6 +31,10 @@ def main() -> None:
     llm = ChatLLM()
     registry = build_registry(persistent_memory=pm)
     skills_loader = SkillsLoader()
+
+    parent_ctx = SubAgentContext(depth=0, parent_run_dir=RUNS_DIR, parent_session_id="cli")
+    registry.register(DelegateTool(llm, registry, RUNS_DIR, parent_ctx))
+    registry.register(TeamTool(llm, registry, RUNS_DIR, parent_ctx))
 
     agent = AgentLoop(
         registry=registry,
