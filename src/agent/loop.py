@@ -32,6 +32,8 @@ RUNS_DIR = Path(__file__).resolve().parents[2] / "runs"
 TOKEN_THRESHOLD = int(os.getenv("TOKEN_THRESHOLD", "40000"))
 KEEP_RECENT = 3
 TOOL_RESULT_LIMIT = 10_000
+FORCE_ANSWER_THRESHOLD = 8
+WARN_ITERATION_RATIO = 0.6
 
 COLLAPSE_THRESHOLD = int(TOKEN_THRESHOLD * 0.7)
 COLLAPSE_PRESERVE_RECENT = 6
@@ -268,6 +270,7 @@ class AgentLoop:
 
         iteration = 0
         final_content = ""
+        tool_call_count = 0
 
         try:
             while iteration < self.max_iterations:
@@ -277,6 +280,13 @@ class AgentLoop:
                     break
 
                 iteration += 1
+
+                remaining = self.max_iterations - iteration
+                warn_at = int(self.max_iterations * WARN_ITERATION_RATIO)
+
+                if iteration >= warn_at and remaining > 2:
+                    messages.append({"role": "user", "content": f"[SYSTEM] You have {remaining} iterations remaining. Stop calling tools NOW and synthesize your answer from the information you have already collected."})
+                    messages.append({"role": "assistant", "content": "Understood, I will now synthesize my answer."})
 
                 _microcompact(messages)
 
@@ -297,9 +307,11 @@ class AgentLoop:
                     thinking_chunks.append(delta)
                     self._emit("text_delta", {"delta": delta, "iter": iteration})
 
+                force_no_tools = tool_call_count >= FORCE_ANSWER_THRESHOLD or remaining <= 1
+
                 response = self.llm.stream_chat(
                     messages,
-                    tools=self.registry.get_definitions(),
+                    tools=[] if force_no_tools else self.registry.get_definitions(),
                     on_text_chunk=_on_text_chunk,
                 )
 
@@ -313,6 +325,8 @@ class AgentLoop:
                     trace.write({"type": "answer", "iter": iteration, "content": final_content[:2000]})
                     react_trace.append({"type": "answer", "content": final_content[:500]})
                     break
+
+                tool_call_count += len(response.tool_calls)
 
                 messages.append(
                     context.format_assistant_tool_calls(
@@ -448,12 +462,19 @@ class AgentLoop:
             elapsed_ms = int((_time.perf_counter() - t0) * 1000)
             return tc, result, elapsed_ms
 
+        TOOL_TIMEOUT = 120  # seconds
         with concurrent.futures.ThreadPoolExecutor(max_workers=min(len(runnable), 8)) as pool:
             futures = [pool.submit(_run, item) for item in runnable]
             results = []
             for i, f in enumerate(futures):
                 try:
-                    results.append(f.result())
+                    results.append(f.result(timeout=TOOL_TIMEOUT))
+                except concurrent.futures.TimeoutError:
+                    tc = runnable[i][0]
+                    results.append((tc, json.dumps({"status": "error", "error": f"Tool '{tc.name}' timed out after {TOOL_TIMEOUT}s"}), 0))
+                except KeyboardInterrupt:
+                    pool.shutdown(wait=False, cancel_futures=True)
+                    raise
                 except Exception as exc:
                     tc = runnable[i][0]
                     results.append((tc, json.dumps({"status": "error", "error": str(exc)}), 0))
