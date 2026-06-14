@@ -34,7 +34,7 @@ python mcp_server.py --transport sse --port 8900
 
 # 3d. Run IM gateway (WeCom / WeChat)
 pip install -e ".[gateway]"
-# 在 .env 里填好平台凭据（见下方 IM Gateway 一节），然后：
+# WeCom 在 .env 里填凭据；WeChat 推荐用 `gateway.py login weixin` 扫码。
 python gateway.py init            # 从 .env 自动生成 gateway.yaml
 python gateway.py doctor          # check config + env
 python gateway.py run             # foreground
@@ -52,9 +52,11 @@ pip install -e ".[gateway]"      # adds httpx, aiohttp, pycryptodome, defusedxml
 
 FastAPI and uvicorn are already required by the base project. The gateway command line is exposed via `gateway.py` (or `mini-agent-gateway` after install).
 
-### Configure（只需填 `.env`，无需手写 yaml）
+### Configure（WeCom 填 `.env`，WeChat 推荐扫码）
 
-凭据集中放在 **`.env`**（和 LLM 配置同一个文件），`gateway.py init` 会据此自动生成 `gateway.yaml`——**某平台的必填项全部填好后，该平台自动启用**，留空则保持关闭。
+WeCom 凭据集中放在 **`.env`**（和 LLM 配置同一个文件），`gateway.py init` 会据此自动生成 `gateway.yaml`——**某平台的必填项全部填好后，该平台自动启用**，留空则保持关闭。
+
+WeChat iLink 推荐不在 `.env` 手填账号/token，而是运行 `python gateway.py login weixin` 扫码。扫码成功后凭据会保存在 `~/.mini-agent/gateway/weixin_credentials.json`，`gateway.py run`、`doctor` 和平台锁都会读取这个文件。
 
 ```bash
 # 1) 在 .env 里填凭据（.env.example 已带 IM Gateway 段，取消注释填值即可）
@@ -67,7 +69,8 @@ WECOM_TOKEN=...
 WECOM_AES_KEY=...            # WeCom 控制台 43 位
 WECOM_ALLOW_FROM=            # 可选，逗号分隔的 UserID 白名单（留空=允许所有人）
 
-# WeChat 个人微信（iLink / ClawBot）—— 来自你的 bot 控制台
+# WeChat 个人微信（iLink / ClawBot）—— 推荐留空，改用 `gateway.py login weixin` 扫码
+# 若你已经有控制台凭据，也可以手动填下面几项。
 WEIXIN_ACCOUNT_ID=xxx@im.bot
 WEIXIN_TOKEN=ilinkbot_xxx
 WEIXIN_DM_POLICY=allowlist   # disabled | allowlist | open
@@ -112,6 +115,8 @@ python gateway.py doctor --json       # for CI / scripts
 
 Doctor checks Python path, working dir, data dir, port availability, logging dir, WeCom app fields, WeChat credentials, platform account locks, and Windows Task Scheduler availability. Any `fatal` check blocks `service install`.
 
+If a gateway is already running, `doctor` will report `lock_weixin` as `fatal` because the live process correctly owns the WeChat token lock. That is expected for a healthy running gateway; stop the running foreground process or service before using `doctor` as a pre-install gate.
+
 ### Login WeChat (iLink) — 扫码即配置
 
 ```bash
@@ -122,7 +127,8 @@ python gateway.py login weixin
 
 1. 凭据写入 `~/.mini-agent/gateway/weixin_credentials.json`；
 2. `gateway.yaml` 中 `platforms.weixin.enabled` 自动置为 `true`；
-3. 直接 `python gateway.py run` 即可启动，无需手动编辑配置。
+3. `gateway.py run` 会优先读取该凭据文件，并使用其中的真实 token 生成单实例锁；
+4. 直接 `python gateway.py run --config gateway.yaml` 即可启动，无需手动编辑配置。
 
 终端二维码需要 `qrcode` 包（含在 `pip install -e ".[gateway]"` 里）；若未安装，仍可打开打印出的链接扫码。整个扫码状态机（wait → scaned → confirmed）的 transport 是可注入的，已有单测覆盖（`tests/test_gateway_core.py`），无需真连 Tencent。
 
@@ -145,11 +151,13 @@ python gateway.py service uninstall   # keeps data_dir, creds, sessions, logs
 
 WeCom `corp_id:agent_id` and WeChat iLink `bot_token` cannot be polled by two processes at once (they'd advance each other's sync cursor and corrupt context_token caches). The gateway writes a lock file under `~/.mini-agent/gateway/locks/<scope>/<identity>.json` before each adapter connects:
 
-- **WeChat token** → identity is the short SHA-256 of the token (raw token never written down).
+- **WeChat token** → identity is the short SHA-256 of the token (raw token never written down). For scan-login setups, the token is read from `weixin_credentials.json`, even when `gateway.yaml` leaves `bot_token` empty.
 - **WeCom app** → identity is `corp_id:agent_id` (not secret).
 - A held lock whose `pid` is still alive blocks the second adapter with a `fatal` error.
 - A stale lock (pid dead) can be cleaned with explicit `force_stale_lock=True` (no live-lock stealing).
 - To detect overlap with hermes, set `locks.check_hermes: true` and `locks.hermes_lock_dir` to where hermes stores its locks.
+
+For WeChat, keep exactly one `gateway.py run` process alive per token. Multiple pollers can consume each other's `get_updates_buf` cursor and make messages appear to vanish from the agent.
 
 ### What's stored where
 
