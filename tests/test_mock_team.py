@@ -164,7 +164,7 @@ def test_team_dag() -> bool:
             last_user = ""
             for m in reversed(messages):
                 if m.get("role") == "user":
-                    last_user = str(m.get("content", ""))[:200]
+                    last_user = str(m.get("content", ""))
                     break
             has_upstream = "<upstream-results>" in last_user
             tag = "MERGE" if has_upstream else "LEAF"

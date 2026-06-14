@@ -18,8 +18,9 @@ import json
 import logging
 import os
 import time as _time
+from collections import deque
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Deque, Dict, List, Optional
 
 from src.agent.context import ContextBuilder
 from src.agent.memory import WorkspaceMemory
@@ -30,12 +31,18 @@ from src.providers.chat import ChatLLM
 
 RUNS_DIR = Path(__file__).resolve().parents[2] / "runs"
 TOKEN_THRESHOLD = int(os.getenv("TOKEN_THRESHOLD", "40000"))
-KEEP_RECENT = 3
+# Phase 6: KEEP_RECENT migrated 3 -> 6 so microcompact's pruning window
+# aligns with the new token-gated firing threshold.
+KEEP_RECENT = 6
 TOOL_RESULT_LIMIT = 10_000
 FORCE_ANSWER_THRESHOLD = 8
 WARN_ITERATION_RATIO = 0.6
 
-COLLAPSE_THRESHOLD = int(TOKEN_THRESHOLD * 0.7)
+# Phase 6: both Layer 1 (microcompact) and Layer 2 (context_collapse) share
+# the same 0.85 * TOKEN_THRESHOLD firing gate. Two named constants keep them
+# readable and allows future divergence (see clarification Q9).
+COLLAPSE_THRESHOLD = int(TOKEN_THRESHOLD * 0.85)
+MICROCOMPACT_THRESHOLD = int(TOKEN_THRESHOLD * 0.85)
 COLLAPSE_PRESERVE_RECENT = 6
 COLLAPSE_TEXT_MIN = 2400
 COLLAPSE_HEAD = 900
@@ -51,6 +58,16 @@ def estimate_tokens(messages: list) -> int:
 
 
 def _microcompact(messages: list) -> None:
+    """Layer 1: prune old tool-result contents (in place).
+
+    Phase 6: gated on the shared MICROCOMPACT_THRESHOLD so direct callers
+    (e.g. tests probing this function in isolation) observe the same "do not
+    fire below 0.85*T" contract as `AgentLoop.run`. The call site in
+    `AgentLoop.run` also pre-checks the threshold so it can emit the
+    `silent_compress` trace event with the pre-mutation token estimate.
+    """
+    if estimate_tokens(messages) <= MICROCOMPACT_THRESHOLD:
+        return
     tool_msgs = [m for m in messages if m.get("role") == "tool"]
     if len(tool_msgs) <= KEEP_RECENT:
         return
@@ -240,6 +257,10 @@ class AgentLoop:
         self._cancelled: bool = False
         self._previous_summary: str = ""
         self._persistent_memory = persistent_memory
+        # Phase 2: rolling window of recent cache_hit_ratio values for the
+        # cache_warning threshold. None ratios are NEVER pushed (missing data
+        # neither counts nor resets the streak). See clarification Q7.
+        self._recent_ratios: Deque[float] = deque(maxlen=3)
 
     def cancel(self) -> None:
         self._cancelled = True
@@ -288,10 +309,28 @@ class AgentLoop:
                     messages.append({"role": "user", "content": f"[SYSTEM] You have {remaining} iterations remaining. Stop calling tools NOW and synthesize your answer from the information you have already collected."})
                     messages.append({"role": "assistant", "content": "Understood, I will now synthesize my answer."})
 
-                _microcompact(messages)
-
+                # Phase 6: gate Layer 1 (microcompact) and Layer 2 (collapse)
+                # behind the shared 0.85*T threshold, and emit a silent_compress
+                # trace event BEFORE each mutation. `tokens` is estimated once
+                # before microcompact, then re-estimated after collapse so the
+                # subsequent TOKEN_THRESHOLD check uses post-collapse count.
                 tokens = estimate_tokens(messages)
+                if tokens > MICROCOMPACT_THRESHOLD:
+                    trace.write({
+                        "type": "silent_compress",
+                        "layer": "microcompact",
+                        "tokens": tokens,
+                        "iter": iteration,
+                    })
+                    _microcompact(messages)
+
                 if tokens > COLLAPSE_THRESHOLD:
+                    trace.write({
+                        "type": "silent_compress",
+                        "layer": "collapse",
+                        "tokens": tokens,
+                        "iter": iteration,
+                    })
                     _context_collapse(messages)
                     tokens = estimate_tokens(messages)
 
@@ -318,6 +357,10 @@ class AgentLoop:
                     on_text_chunk=_on_text_chunk,
                     on_reasoning_chunk=_on_reasoning_chunk,
                 )
+
+                # Phase 2: read cache_stats off the response and emit per-turn
+                # observability + rolling-window warning. See clarification Q6/Q7.
+                self._observe_cache_stats(response, trace, iteration)
 
                 thinking_text = "".join(reasoning_chunks)
                 if thinking_text:
@@ -594,6 +637,58 @@ class AgentLoop:
                 self._event_callback(event_type, data)
             except Exception:
                 pass
+
+    def _observe_cache_stats(self, response: Any, trace: TraceWriter, iteration: int) -> None:
+        """Phase 2: emit per-turn cache_stats event + rolling-window warning.
+
+        Per clarification Q6/Q7:
+          - When `response.cache_stats.is_available`, emit a `cache_stats` event
+            carrying {iter, cached, prompt, ratio} so the CLI can print
+            `[cache: NK/NK cached, NN%]`.
+          - Push the ratio (when not None) to `_recent_ratios`; when the deque
+            holds 3 values all < 0.5, emit `cache_warning` via BOTH the event
+            callback AND trace, then clear the deque so it does not re-fire
+            on the next turn.
+        """
+        cache_stats = getattr(response, "cache_stats", None)
+        if cache_stats is None:
+            return
+
+        ratio = getattr(cache_stats, "cache_hit_ratio", None)
+        prompt_tokens = getattr(cache_stats, "prompt_tokens", None)
+        cached_tokens = getattr(cache_stats, "cached_tokens", None)
+
+        if getattr(cache_stats, "is_available", False) and ratio is not None:
+            self._emit("cache_stats", {
+                "iter": iteration,
+                "cached": cached_tokens,
+                "prompt": prompt_tokens,
+                "ratio": ratio,
+            })
+
+            self._recent_ratios.append(ratio)
+            if (
+                len(self._recent_ratios) == 3
+                and all(r < 0.5 for r in self._recent_ratios)
+            ):
+                ratios_snapshot = list(self._recent_ratios)
+                warning_payload = {
+                    "iter": iteration,
+                    "ratios": ratios_snapshot,
+                    "msg": "cache hit ratio < 50% for 3 consecutive turns "
+                           "— system prompt may be unstable",
+                }
+                self._emit("cache_warning", warning_payload)
+                try:
+                    trace.write({
+                        "type": "cache_warning",
+                        "iter": iteration,
+                        "ratios": ratios_snapshot,
+                        "msg": warning_payload["msg"],
+                    })
+                except Exception:
+                    pass
+                self._recent_ratios.clear()
 
     def _update_memory(self, tool_name: str) -> None:
         self.memory.increment(tool_name)

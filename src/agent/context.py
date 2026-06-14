@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 from datetime import datetime
@@ -16,6 +17,11 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+# Phase 1: the system prompt is now byte-stable within a session.
+# Dynamic fields (current_datetime, memory_summary, persistent-memory section)
+# have been MOVED OUT into the user-message envelope (see `_build_user_envelope`).
+# Only stable post-startup fields remain here: tool_count, skill_count,
+# tool_descriptions, skill_descriptions.
 _SYSTEM_PROMPT = """You are an intelligent agent with {skill_count} skills, {tool_count} tools, and persistent cross-session memory.
 
 ## Tools
@@ -26,10 +32,6 @@ _SYSTEM_PROMPT = """You are an intelligent agent with {skill_count} skills, {too
 
 {skill_descriptions}
 
-## State
-
-{memory_summary}
-
 ## Guidelines
 
 - Load the relevant skill BEFORE starting any task. Skills contain the exact API contracts and examples.
@@ -38,7 +40,7 @@ _SYSTEM_PROMPT = """You are an intelligent agent with {skill_count} skills, {too
 - Respond in the same language the user used.
 - You have persistent cross-session memory (`remember` tool). When the user shares preferences or important findings, save them for future sessions.
 - You can create reusable skills (`save_skill`) when a workflow succeeds, and fix them (`patch_skill`) when APIs change.
-{memory_section}
+
 ## Tool Usage Discipline (CRITICAL)
 
 - After **3-5 tool calls**, you MUST stop and synthesize an answer from what you have gathered.
@@ -63,17 +65,6 @@ Anti-patterns:
 - Do NOT delegate trivial tasks (single tool call) — do them yourself
 - Do NOT use spawn_team for sequential tasks — use delegate for each step
 - Do NOT expect subagents to share state — pass context explicitly
-
-## Current Date & Time
-
-Today is {current_datetime}.
-"""
-
-_MEMORY_SECTION = """
-## Persistent Memory (cross-session)
-
-{snapshot}
-
 """
 
 
@@ -87,24 +78,102 @@ class ContextBuilder:
         self.memory = memory
         self.skills_loader = skills_loader or SkillsLoader()
         self._persistent_memory = persistent_memory
+        # Phase 1: hash-based system-prompt cache. The rendered system prompt is
+        # a deterministic function of tool/skill inputs, so we memoize on a hash
+        # of those inputs. Stored on the instance (not module-global) because
+        # ContextBuilder is constructed once per AgentLoop.run; see clarification Q3.
+        self._cached_prompt: Optional[str] = None
+        self._cached_prompt_hash: Optional[str] = None
 
     def build_system_prompt(self, user_message: str = "") -> str:
-        now = datetime.now()
+        current_hash = self._compute_prompt_hash()
+        if self._cached_prompt is not None and self._cached_prompt_hash == current_hash:
+            return self._cached_prompt
 
-        memory_section = ""
-        if self._persistent_memory and self._persistent_memory.snapshot:
-            memory_section = _MEMORY_SECTION.format(
-                snapshot=self._persistent_memory.snapshot,
-            )
-
-        return _SYSTEM_PROMPT.format(
+        rendered = _SYSTEM_PROMPT.format(
             tool_count=len(self.registry._tools),
             skill_count=len(self.skills_loader.skills),
             tool_descriptions=self._format_tool_descriptions(),
             skill_descriptions=self.skills_loader.get_descriptions(),
-            memory_summary=self.memory.to_summary(),
-            memory_section=memory_section,
-            current_datetime=now.strftime("%A, %B %d, %Y %H:%M (local)"),
+        )
+        self._cached_prompt = rendered
+        self._cached_prompt_hash = current_hash
+        return rendered
+
+    def _compute_prompt_hash(self) -> str:
+        """SHA-256 over the stable inputs that fully determine the rendered prompt.
+
+        Per clarification Q3: hash sorted tool names + full tool descriptions
+        (name + description + parameters JSON) + sorted skill names + each
+        skill's description segment. Detects any change to tool/skill surface.
+        """
+        parts: List[str] = []
+        # Sorted tool names.
+        for name in sorted(self.registry._tools.keys()):
+            parts.append(name)
+        # Full tool descriptions in registry insertion order — but to be
+        # deterministic across runs we sort the tools alphabetically here too.
+        # The hash is computed over the same content each call, so order just
+        # needs to be stable.
+        sorted_tools = sorted(self.registry._tools.values(), key=lambda t: t.name)
+        for tool in sorted_tools:
+            parts.append(tool.name)
+            parts.append(tool.description)
+            try:
+                parts.append(json.dumps(tool.parameters, ensure_ascii=False, sort_keys=True))
+            except (TypeError, ValueError):
+                parts.append(str(tool.parameters))
+        # Sorted skill names + descriptions.
+        sorted_skills = sorted(self.skills_loader.skills, key=lambda s: s.name)
+        for skill in sorted_skills:
+            parts.append(skill.name)
+            parts.append(skill.description)
+        joined = "\n".join(parts)
+        return hashlib.sha256(joined.encode("utf-8")).hexdigest()
+
+    def _build_user_envelope(self, user_message: str) -> str:
+        """Compose the always-on three-block user-message envelope.
+
+        Per clarification Q2: workspace-state -> persistent-memory ->
+        recalled-memories -> raw user text. All three blocks are ALWAYS
+        rendered, even when empty (placeholder "(none)"). The block order is
+        fixed so the user-message prefix is byte-stable across turns, which
+        matters for providers that do prefix matching into the first user
+        message (DeepSeek).
+        """
+        now = datetime.now()
+        datetime_str = now.strftime("%A, %B %d, %Y %H:%M (local)")
+        memory_summary = self.memory.to_summary()
+
+        persistent_block = "(none)"
+        if self._persistent_memory and getattr(self._persistent_memory, "snapshot", ""):
+            persistent_block = self._persistent_memory.snapshot
+
+        recalled_block = "(none)"
+        if self._persistent_memory:
+            try:
+                recalls = self._persistent_memory.find_relevant(user_message, max_results=3)
+                if recalls:
+                    lines = [
+                        f"- **{r.title}** ({r.memory_type}): {r.body[:500]}"
+                        for r in recalls
+                    ]
+                    recalled_block = "\n".join(lines)
+            except Exception as exc:
+                logger.debug("Auto-recall failed: %s", exc)
+
+        return (
+            f"<workspace-state>\n"
+            f"{datetime_str}\n"
+            f"{memory_summary}\n"
+            f"</workspace-state>\n\n"
+            f"<persistent-memory>\n"
+            f"{persistent_block}\n"
+            f"</persistent-memory>\n\n"
+            f"<recalled-memories>\n"
+            f"{recalled_block}\n"
+            f"</recalled-memories>\n\n"
+            f"{user_message}"
         )
 
     def build_messages(self, user_message: str, history: Optional[List[Dict[str, Any]]] = None) -> List[Dict[str, Any]]:
@@ -114,21 +183,8 @@ class ContextBuilder:
         if history:
             messages.extend(history)
 
-        enriched = user_message
-        if self._persistent_memory:
-            try:
-                recalls = self._persistent_memory.find_relevant(user_message, max_results=3)
-                if recalls:
-                    lines = [f"- **{r.title}** ({r.memory_type}): {r.body[:500]}" for r in recalls]
-                    recall_block = "\n".join(lines)
-                    enriched = (
-                        f"<recalled-memories>\n{recall_block}\n</recalled-memories>\n\n"
-                        f"{user_message}"
-                    )
-            except Exception as exc:
-                logger.debug("Auto-recall failed: %s", exc)
-
-        messages.append({"role": "user", "content": enriched})
+        envelope = self._build_user_envelope(user_message)
+        messages.append({"role": "user", "content": envelope})
         return messages
 
     def _format_tool_descriptions(self) -> str:

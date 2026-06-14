@@ -22,6 +22,26 @@ if str(AGENT_DIR) not in sys.path:
 RUNS_DIR = AGENT_DIR / "runs"
 
 
+def format_cache_stats_line(data: dict) -> str | None:
+    """Phase 2: format a `cache_stats` event payload as the user-facing CLI line.
+
+    Returns the bracketed line per clarification Q6:
+        `[cache: <cached>K/<prompt>K cached, <pct>%]`
+    where <cached> and <prompt> are integer kilotokens (// 1024) and <pct> is
+    int(ratio * 100). Returns None when ratio is None — the caller must skip
+    printing in that case (silent miss / no-usage-data).
+    """
+    ratio = data.get("ratio")
+    if ratio is None:
+        return None
+    cached_tokens = int(data.get("cached") or 0)
+    prompt_tokens = int(data.get("prompt") or 0)
+    cached_k = cached_tokens // 1024
+    prompt_k = prompt_tokens // 1024
+    pct = int(ratio * 100)
+    return f"[cache: {cached_k}K/{prompt_k}K cached, {pct}%]"
+
+
 def main() -> None:
     from src.agent.loop import AgentLoop
     from src.agent.skills import SkillsLoader
@@ -85,6 +105,13 @@ def main() -> None:
         elif event_type == "compact":
             tokens = data.get("tokens_before", "?")
             print(f"[compact] triggered at {tokens} tokens", flush=True)
+        elif event_type == "cache_stats":
+            # Phase 2: per-turn cache hit-ratio indicator (Q6 format).
+            # Silent when ratio is None — AgentLoop does not emit the event
+            # in that case, but we double-check defensively.
+            line = format_cache_stats_line(data)
+            if line is not None:
+                print(line, flush=True)
 
     agent = AgentLoop(
         registry=registry,
