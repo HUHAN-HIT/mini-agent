@@ -1,0 +1,73 @@
+# Mini-agent gateway config example.
+# Copy to gateway.yaml and fill in real credentials, or set the matching
+# environment variables. ${VAR:-default} expands from env; ~/ expands to home.
+
+server:
+  host: "0.0.0.0"
+  port: 8645
+
+data_dir: "~/.mini-agent/gateway"
+
+locks:
+  enabled: true
+  dir: "~/.mini-agent/gateway/locks"
+  stale_after_seconds: 86400
+  check_hermes: false        # set true + hermes_lock_dir to detect hermes overlap
+  hermes_home: ""
+  hermes_lock_dir: ""
+
+session:
+  router_path: "~/.mini-agent/gateway/sessions_map.json"
+  group_sessions_per_user: true
+  thread_sessions_per_user: false
+  per_session_serial: true
+  history_max_chars: 12000
+
+platforms:
+  wecom:
+    enabled: false
+    message_dedup_ttl_seconds: 300
+    apps:
+      - name: "default"
+        corp_id: ${WECOM_CORP_ID:-}
+        agent_id: ${WECOM_AGENT_ID:-}
+        corp_secret: ${WECOM_SECRET:-}
+        token: ${WECOM_TOKEN:-}
+        encoding_aes_key: ${WECOM_AES_KEY:-}
+        allow_from: []
+
+  weixin:
+    enabled: false
+    bot_type: "3"
+    base_url: "https://ilinkai.weixin.qq.com"
+    cdn_base_url: "https://novac2c.c2c.weixin.qq.com/c2c"
+    account_id: ${WEIXIN_ACCOUNT_ID:-}
+    bot_token: ${WEIXIN_TOKEN:-}
+    dm_policy: "allowlist"            # disabled | allowlist | open
+    allow_from: []
+    group_policy: "disabled"          # P1 default: groups off
+    group_allow_from: []
+    text_batch_delay_seconds: 3.0
+    text_batch_split_delay_seconds: 5.0
+    send_chunk_delay_seconds: 1.5
+    rate_limit_circuit_threshold: 1
+    rate_limit_circuit_window_seconds: 30
+    rate_limit_circuit_open_seconds: 30
+
+logging:
+  level: "INFO"
+  file: "~/.mini-agent/gateway/gateway.log"
+
+service:
+  name: "mini-agent-gateway"
+  autostart: false        # doctor warns if true but not installed; install is never implicit
+  start_on: "logon"
+  python: ".venv/Scripts/python.exe"
+  cwd: "."
+  args: ["gateway.py", "run", "--config", "gateway.yaml"]
+  log_file: "~/.mini-agent/gateway/logs/service.log"
+  status_file: "~/.mini-agent/gateway/status.json"
+  restart:
+    enabled: true
+    max_attempts: 5
+    delay_seconds: 10

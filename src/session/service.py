@@ -98,14 +98,43 @@ class SessionService:
                            content=attempt.summary or "Execution completed.", linked_attempt_id=attempt.attempt_id)
             self.store.append_message(reply)
             self._search_index.index_message(session.session_id, "assistant", reply.content)
-            self.event_bus.emit(session.session_id,
-                              "attempt.completed" if attempt.status == AttemptStatus.COMPLETED else "attempt.failed",
-                              {"attempt_id": attempt.attempt_id, "status": attempt.status.value})
+
+            if attempt.status == AttemptStatus.COMPLETED:
+                self.event_bus.emit(
+                    session.session_id,
+                    "attempt.completed",
+                    {
+                        "attempt_id": attempt.attempt_id,
+                        "status": attempt.status.value,
+                        "content": reply.content,
+                        "run_dir": attempt.run_dir,
+                    },
+                )
+            else:
+                self.event_bus.emit(
+                    session.session_id,
+                    "attempt.failed",
+                    {
+                        "attempt_id": attempt.attempt_id,
+                        "status": attempt.status.value,
+                        "error": attempt.error or "",
+                        "run_dir": attempt.run_dir,
+                    },
+                )
 
         except Exception as exc:
             attempt.mark_failed(error=str(exc))
             self.store.update_attempt(attempt)
-            self.event_bus.emit(session.session_id, "attempt.failed", {"attempt_id": attempt.attempt_id, "error": str(exc)})
+            self.event_bus.emit(
+                session.session_id,
+                "attempt.failed",
+                {
+                    "attempt_id": attempt.attempt_id,
+                    "status": attempt.status.value,
+                    "error": str(exc),
+                    "run_dir": attempt.run_dir,
+                },
+            )
 
     async def _run_with_agent(self, attempt: Attempt, messages: list = None) -> Dict[str, Any]:
         from src.tools import build_registry
