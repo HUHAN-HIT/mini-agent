@@ -41,7 +41,7 @@ COLLAPSE_TEXT_MIN = 2400
 COLLAPSE_HEAD = 900
 COLLAPSE_TAIL = 500
 
-TAIL_TOKEN_BUDGET = 20_000
+TAIL_TOKEN_BUDGET = 200_000
 
 logger = logging.getLogger(__name__)
 
@@ -301,11 +301,14 @@ class AgentLoop:
 
                 logger.info(f"ReAct iteration {iteration}/{self.max_iterations}")
 
-                thinking_chunks: List[str] = []
+                reasoning_chunks: List[str] = []
 
                 def _on_text_chunk(delta: str) -> None:
-                    thinking_chunks.append(delta)
                     self._emit("text_delta", {"delta": delta, "iter": iteration})
+
+                def _on_reasoning_chunk(delta: str) -> None:
+                    reasoning_chunks.append(delta)
+                    self._emit("thinking_delta", {"delta": delta, "iter": iteration})
 
                 force_no_tools = tool_call_count >= FORCE_ANSWER_THRESHOLD or remaining <= 1
 
@@ -313,9 +316,10 @@ class AgentLoop:
                     messages,
                     tools=[] if force_no_tools else self.registry.get_definitions(),
                     on_text_chunk=_on_text_chunk,
+                    on_reasoning_chunk=_on_reasoning_chunk,
                 )
 
-                thinking_text = "".join(thinking_chunks)
+                thinking_text = "".join(reasoning_chunks)
                 if thinking_text:
                     trace.write({"type": "thinking", "iter": iteration, "content": thinking_text[:2000]})
                     self._emit("thinking_done", {"iter": iteration, "content": thinking_text[:500]})

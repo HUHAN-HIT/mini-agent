@@ -281,7 +281,7 @@ class TeamRunner:
         return "<upstream-results>\n" + "\n\n".join(chunks) + "\n</upstream-results>"
 
     def _run_aggregator(self, spec: AgentSpec, results: Dict[str, Dict[str, Any]]) -> Dict[str, Any]:
-        all_ids = [a.id for a in results.keys()] if False else list(results.keys())
+        all_ids = list(results.keys())
         spec_with_all_inputs = AgentSpec(
             id=spec.id,
             role=spec.role,

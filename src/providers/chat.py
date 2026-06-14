@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
 from src.providers.llm import build_llm
+
+logger = logging.getLogger(__name__)
 
 
 def _dedupe_finish_reason(raw: str) -> str:
@@ -53,6 +56,7 @@ class ChatLLM:
         messages: List[Dict[str, Any]],
         tools: Optional[List[Dict[str, Any]]] = None,
         on_text_chunk: Optional[Any] = None,
+        on_reasoning_chunk: Optional[Any] = None,
         timeout: Optional[int] = None,
     ) -> LLMResponse:
         try:
@@ -62,11 +66,17 @@ class ChatLLM:
             for chunk in llm.stream(messages, config=config):
                 if chunk.content and on_text_chunk:
                     on_text_chunk(chunk.content)
+                reasoning = ""
+                if chunk.additional_kwargs:
+                    reasoning = chunk.additional_kwargs.get("reasoning_content") or ""
+                if reasoning and on_reasoning_chunk:
+                    on_reasoning_chunk(reasoning)
                 accumulated = chunk if accumulated is None else accumulated + chunk
             if accumulated is None:
                 return LLMResponse(content="", tool_calls=[], finish_reason="stop")
             return self._parse_response(accumulated)
         except Exception:
+            logger.exception("stream_chat failed; falling back to non-streaming chat")
             return self.chat(messages, tools=tools, timeout=timeout)
 
     async def achat(self, messages: List[Dict[str, Any]], tools: Optional[List[Dict[str, Any]]] = None, timeout: Optional[int] = None) -> LLMResponse:

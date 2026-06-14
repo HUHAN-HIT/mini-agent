@@ -45,10 +45,12 @@ class MockLLM:
         self._idx += 1
         return MockLLMResponse(content=self._scripted[idx])
 
-    def stream_chat(self, messages, tools=None, on_text_chunk=None, timeout=None) -> MockLLMResponse:
+    def stream_chat(self, messages, tools=None, on_text_chunk=None, on_reasoning_chunk=None, timeout=None) -> MockLLMResponse:
         resp = self.chat(messages, tools=tools, timeout=timeout)
         if on_text_chunk and resp.content:
             on_text_chunk(resp.content)
+        if on_reasoning_chunk and resp.reasoning_content:
+            on_reasoning_chunk(resp.reasoning_content)
         return resp
 
     async def achat(self, messages, tools=None, timeout=None) -> MockLLMResponse:
