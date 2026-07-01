@@ -18,3 +18,5 @@ src/core/__pycache__/*
 src/gateway/__pycache__/
 src/gateway/platforms/__pycache__/
 __pycache__/*
+# superpowers SDD scratch
+.superpowers/

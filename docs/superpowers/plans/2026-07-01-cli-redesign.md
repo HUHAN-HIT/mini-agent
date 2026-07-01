@@ -1895,22 +1895,15 @@ def run_repl(*, agent, skills, renderer, reader, console, history) -> None:
             continue
 
         renderer.begin()
-        result = agent.run(
-            user_message=user_input,
-            history=history or None,
-            event_callback=None,  # renderer 已通过 agent 的 event_callback 注入（见 main）
-        ) if _agent_accepts_event_callback(agent) else agent.run(
-            user_message=user_input, history=history or None)
+        # AgentLoop 的 event_callback 已在 main() 构造时固定注入 renderer.handle，
+        # 因此这里只传 user_message / history。
+        result = agent.run(user_message=user_input, history=history or None)
 
         status = result.get("status", "unknown")
         content = result.get("content", "")
         history.append({"role": "user", "content": user_input})
         history.append({"role": "assistant", "content": content})
         renderer.finish(status=status, content=content, run_dir=result.get("run_dir"))
-
-
-def _agent_accepts_event_callback(agent) -> bool:  # type: ignore[no-untyped-def]
-    return False  # main() 在构造 AgentLoop 时固定注入 event_callback，REPL 不再逐轮传
 
 
 def main() -> None:
@@ -1984,7 +1977,7 @@ def _read_version() -> str:
 __all__ = ["main", "run_repl"]
 ```
 
-> 说明：`AgentLoop` 在 `main()` 里通过 `event_callback` 固定注入 `renderer.handle`，因此 REPL 里 `_agent_accepts_event_callback` 恒为 False，`agent.run` 只传 `user_message`/`history`。测试用的 `_FakeAgent.run(**kw)` 兼容该签名。
+> 说明：`AgentLoop` 在 `main()` 里通过构造参数 `event_callback` 固定注入 `renderer.handle`，因此 REPL 里 `agent.run` 只传 `user_message`/`history`。测试用的 `_FakeAgent.run(*, user_message, history=None, **kw)` 兼容该签名。
 
 - [ ] **Step 4: 运行测试确认通过**
 
