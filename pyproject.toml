@@ -24,6 +24,7 @@ dependencies = [
     "beautifulsoup4>=4.12",
     "lxml>=5.0",
     "rich>=13.0",
+    "prompt-toolkit>=3.0",
 ]
 
 [project.optional-dependencies]
