@@ -43,6 +43,7 @@ gateway = [
 ]
 
 [project.scripts]
+mini-agent = "cli:main"
 mini-agent-mcp = "mcp_server:main"
 mini-agent-gateway = "gateway:main"
 
