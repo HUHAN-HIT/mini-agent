@@ -2,10 +2,9 @@
 
 from __future__ import annotations
 
-import json
 import os
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Optional
 
 try:
     from dotenv import load_dotenv
@@ -71,6 +70,21 @@ else:
 
 AGENT_DIR = Path(__file__).resolve().parents[2]
 
+# provider -> (api_key 环境变量名 | None, base_url 环境变量名)
+PROVIDER_ENV_MAP: dict[str, tuple[str | None, str]] = {
+    "openai":     ("OPENAI_API_KEY",     "OPENAI_BASE_URL"),
+    "openrouter": ("OPENROUTER_API_KEY", "OPENROUTER_BASE_URL"),
+    "deepseek":   ("DEEPSEEK_API_KEY",   "DEEPSEEK_BASE_URL"),
+    "gemini":     ("GEMINI_API_KEY",     "GEMINI_BASE_URL"),
+    "groq":       ("GROQ_API_KEY",       "GROQ_BASE_URL"),
+    "dashscope":  ("DASHSCOPE_API_KEY",  "DASHSCOPE_BASE_URL"),
+    "qwen":       ("DASHSCOPE_API_KEY",  "DASHSCOPE_BASE_URL"),
+    "zhipu":      ("ZHIPU_API_KEY",      "ZHIPU_BASE_URL"),
+    "moonshot":   ("MOONSHOT_API_KEY",   "MOONSHOT_BASE_URL"),
+    "minimax":    ("MINIMAX_API_KEY",    "MINIMAX_BASE_URL"),
+    "ollama":     (None,                 "OLLAMA_BASE_URL"),
+}
+
 _ENV_CANDIDATES = [
     Path.home() / ".mini-agent" / ".env",
     AGENT_DIR / ".env",
@@ -109,21 +123,7 @@ def _sync_provider_env() -> None:
     _ensure_dotenv()
     provider = os.getenv("LANGCHAIN_PROVIDER", "openai").lower()
 
-    _PROVIDER_MAP: dict[str, tuple[str | None, str]] = {
-        "openai":     ("OPENAI_API_KEY",     "OPENAI_BASE_URL"),
-        "openrouter": ("OPENROUTER_API_KEY",  "OPENROUTER_BASE_URL"),
-        "deepseek":   ("DEEPSEEK_API_KEY",    "DEEPSEEK_BASE_URL"),
-        "gemini":     ("GEMINI_API_KEY",      "GEMINI_BASE_URL"),
-        "groq":       ("GROQ_API_KEY",        "GROQ_BASE_URL"),
-        "dashscope":  ("DASHSCOPE_API_KEY",   "DASHSCOPE_BASE_URL"),
-        "qwen":       ("DASHSCOPE_API_KEY",   "DASHSCOPE_BASE_URL"),
-        "zhipu":      ("ZHIPU_API_KEY",       "ZHIPU_BASE_URL"),
-        "moonshot":   ("MOONSHOT_API_KEY",    "MOONSHOT_BASE_URL"),
-        "minimax":    ("MINIMAX_API_KEY",     "MINIMAX_BASE_URL"),
-        "ollama":     (None,                  "OLLAMA_BASE_URL"),
-    }
-
-    spec = _PROVIDER_MAP.get(provider, _PROVIDER_MAP["openai"])
+    spec = PROVIDER_ENV_MAP.get(provider, PROVIDER_ENV_MAP["openai"])
     key_env, base_env = spec
 
     if key_env is not None:
