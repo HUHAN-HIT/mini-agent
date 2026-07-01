@@ -977,7 +977,7 @@ def handle_builtin_command(command: str, *, history: list[dict[str, Any]],
         return CommandResult(handled=True, output=format_help())
     if normalized == "/clear":
         return CommandResult(handled=True,
-                             output="Screen cleared. In-memory history reset.",
+                             output="已清屏，本会话内存历史已重置 (/clear)",
                              clear_history=True, clear_screen=True)
     if normalized == "/history":
         return CommandResult(handled=True, output=format_history_summary(history))
