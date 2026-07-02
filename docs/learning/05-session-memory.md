@@ -630,47 +630,58 @@ def get_shared_index() -> SessionSearchIndex:
 
 下面是「用户问 agent 一个问题，agent 调用工具后回答」的完整时序：
 
-```
-用户              SessionService        AgentLoop          WS Mem    PM        Store     FTS5    EventBus
- │                     │                   │                 │        │          │         │        │
- │ POST /chat          │                   │                 │        │          │         │        │
- │────────────────────▶│                   │                 │        │          │         │        │
- │                     │ append_message(user)────────────────────────────▶         │         │        │
- │                     │ index_message()──────────────────────────────────────────────▶       │        │
- │                     │ emit message.received─────────────────────────────────────────────────▶       │
- │                     │                   │                 │        │          │         │        │
- │                     │ create Attempt    │                 │        │          │         │        │
- │                     │ update last_attempt_id─────────────────────────▶         │         │        │
- │                     │                   │                 │        │          │         │        │
- │                     │ asyncio.create_task(_run_attempt)  │        │          │         │        │
- │                     │  ┌────────────────│                 │        │          │         │        │
- │                     │  ▼                │                 │        │          │         │        │
- │                     │  AgentLoop(history + WorkspaceMem) │        │          │         │        │
- │                     │  build_messages:                    │        │          │         │        │
- │                     │    ├ snapshot 注入系统提示 ◀───────────────────│          │         │        │
- │                     │    └ find_relevant(user_msg) ◀────────────────│          │         │        │
- │                     │       命中 2 条 → prepend 到 user msg        │          │         │        │
- │                     │                   │                 │        │          │         │        │
- │                     │  LLM 调 remember(recall=...)         │        │          │         │        │
- │                     │                   │ find_relevant ◀───────────│          │         │        │
- │                     │                   │ tool_result 回 LLM       │          │         │        │
- │                     │                   │                 │        │          │         │        │
- │                     │  LLM 调 read_file                    │        │          │         │        │
- │                     │  WS.increment("read_file")─────────▶│        │          │         │        │
- │                     │  emit tool_call ───────────────────────────────────────────────────▶        │
- │                     │                   │                 │        │          │         │        │
- │                     │  LLM 调 remember(save="发现 X")     │        │          │         │        │
- │                     │  PersistentMemory.add() ────────────────────▶│ 写文件+更新索引       │        │
- │                     │                   │                 │        │          │         │        │
- │                     │  LLM 输出 final answer              │        │          │         │        │
- │                     │  ◀────────────────│                 │        │          │         │        │
- │                     │                   │                 │        │          │         │        │
- │                     │ mark_attempt_completed              │        │          │         │        │
- │                     │ append_message(assistant)─────────────────────────────▶           │        │
- │                     │ index_message(assistant)──────────────────────────────────▶       │        │
- │                     │ emit attempt.completed────────────────────────────────────────────▶        │
- │                     │                   │                 │        │          │         │        │
- │ SSE: tool_call, tool_result, answer deltas ◀────────────────────────────────────────────│        │
+```mermaid
+sequenceDiagram
+    actor User as 用户
+    participant SS as SessionService
+    participant AL as AgentLoop
+    participant WS as WS Mem<br/>(WorkspaceMemory)
+    participant PM as PM<br/>(PersistentMemory)
+    participant Store as Store<br/>(SessionStore)
+    participant FTS as FTS5<br/>(SessionSearchIndex)
+    participant Bus as EventBus
+
+    User->>SS: POST /chat
+    SS->>Store: append_message(user)
+    SS->>FTS: index_message(user)
+    SS->>Bus: emit message.received
+
+    SS->>SS: create Attempt<br/>update last_attempt_id
+    SS->>Store: 更新 session.last_attempt_id
+
+    SS->>AL: asyncio.create_task(_run_attempt)<br/>(history + WorkspaceMem)
+
+    Note over AL: build_messages:
+    AL->>PM: 读取 snapshot (注入系统提示)
+    AL->>PM: find_relevant(user_msg)
+    PM-->>AL: 命中 2 条记忆
+    Note over AL: 命中记忆 prepend 到 user msg
+
+    rect rgba(200, 220, 255, 0.3)
+        Note over AL,PM: LLM 调 remember(recall=...)
+        AL->>PM: find_relevant(query)
+        PM-->>AL: tool_result 回 LLM
+    end
+
+    rect rgba(200, 255, 200, 0.3)
+        Note over AL,Bus: LLM 调 read_file
+        AL->>WS: increment("read_file")
+        AL->>Bus: emit tool_call
+    end
+
+    rect rgba(255, 230, 200, 0.3)
+        Note over AL,PM: LLM 调 remember(save="发现 X")
+        AL->>PM: PersistentMemory.add()<br/>写文件 + 更新索引
+    end
+
+    AL-->>SS: LLM 输出 final answer
+
+    SS->>SS: mark_attempt_completed
+    SS->>Store: append_message(assistant)
+    SS->>FTS: index_message(assistant)
+    SS->>Bus: emit attempt.completed
+
+    Bus-->>User: SSE: tool_call, tool_result, answer deltas
 ```
 
 ### 关键观察

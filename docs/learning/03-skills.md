@@ -90,43 +90,33 @@ Skills 系统把这个比喻代码化了：
 └──────────────────────────────────────────────────────────┘
 ```
 
-### 2.4 ASCII 流程图：一次完整的披露过程
+### 2.4 一次完整的披露过程时序图
 
-```
-用户问："帮我写一个 Python 项目骨架"
-        │
-        ▼
-┌─────────────────────────────────────────┐
-│  System Prompt（启动时已注入）            │
-│  ...                                    │
-│  ## Skills                              │
-│  ### tool                               │
-│    - example: An example skill...       │  ← Layer 1: 摘要
-│    - python-template: Quick Python...   │
-│  ...                                    │
-└─────────────────────────────────────────┘
-        │
-        │ agent 推理："python-template" 看起来相关
-        ▼
-┌─────────────────────────────────────────┐
-│  Tool Call: load_skill                  │
-│    { "name": "python-template" }        │  ← Layer 2: 触发
-└─────────────────────────────────────────┘
-        │
-        │ load_skill_tool.py:29 调 loader.get_content()
-        ▼
-┌─────────────────────────────────────────┐
-│  Tool Result（注入 messages）            │
-│  <skill name="python-template">         │
-│  ## Steps                               │  ← Layer 3: 全文
-│  1. mkdir src/ tests/                   │
-│  2. write pyproject.toml...             │
-│  </skill>                               │
-└─────────────────────────────────────────┘
-        │
-        │ agent 拿到全文，照步骤执行
-        ▼
-       write_file / bash ...
+```mermaid
+sequenceDiagram
+    actor User as 用户
+    participant SP as System Prompt<br/>(启动时已注入)
+    participant Agent as Agent
+    participant Tool as load_skill 工具
+    participant Loader as SkillsLoader
+
+    User->>Agent: "帮我写一个 Python 项目骨架"
+
+    Note over SP: ## Skills (Layer 1: 摘要)<br/>### tool<br/>- example: An example skill...<br/>- python-template: Quick Python...
+
+    Agent->>SP: 读取 skill 摘要列表
+    Note over Agent: 推理："python-template" 看起来相关
+
+    Agent->>Tool: load_skill({"name": "python-template"})
+    Note over Tool,Agent: Layer 2: 触发
+
+    Tool->>Loader: get_content("python-template")
+    Loader-->>Tool: <skill name="python-template"><br/>## Steps<br/>1. mkdir src/ tests/<br/>2. write pyproject.toml...<br/></skill>
+    Tool-->>Agent: tool_result (注入 messages)
+    Note over Agent: Layer 3: 全文已载入
+
+    Agent->>Agent: 照步骤执行 write_file / bash ...
+    Agent-->>User: 最终回复
 ```
 
 关键点：**Layer 1 永远在，Layer 3 只在需要的那一轮对话出现**。10 个 skill 各 2000 字，全量预加载要 20000 字；渐进式披露下，典型对话只需 30 字（摘要）+ 2000 字（命中的那一个），节省 90%。
