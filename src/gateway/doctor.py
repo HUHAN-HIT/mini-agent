@@ -170,7 +170,36 @@ def _check_platform_locks(
     lock_manager: PlatformLockManager,
     data_dir: Optional[Path] = None,
 ) -> None:
+    """Verify each enabled platform's resource lock is obtainable.
+
+    A lock left behind by a crashed process used to block ``service install``
+    with a FATAL even though the PID was dead. We now auto-clean stale locks
+    (PID dead, or held past ``stale_after_seconds``) and surface them as a
+    warning — only a *live* holder is FATAL, since stealing that would risk
+    double-polling."""
     platforms = config.get("platforms") or {}
+
+    def _record(name: str, scope: str, identity: str) -> None:
+        info = lock_manager.describe(scope=scope, identity=identity)
+        if info is None:
+            report.checks.append(CheckResult(name, True, "info", f"{scope}/{identity} free"))
+            return
+        cleaned = lock_manager.cleanup_if_stale(scope=scope, identity=identity)
+        if cleaned is not None:
+            report.checks.append(CheckResult(
+                name,
+                True,
+                "warning",
+                f"removed stale {scope}/{identity} (pid={cleaned.pid} dead since {cleaned.started_at})",
+            ))
+        else:
+            report.checks.append(CheckResult(
+                name,
+                False,
+                "fatal",
+                f"held by {info.owner} pid={info.pid} since {info.started_at}",
+            ))
+
     if (platforms.get("wecom") or {}).get("enabled"):
         for app in (platforms["wecom"].get("apps") or []):
             scope, identity = lock_identity_for_adapter(
@@ -178,36 +207,11 @@ def _check_platform_locks(
                 corp_id=app.get("corp_id", ""),
                 agent_id=str(app.get("agent_id") or ""),
             )
-            info = lock_manager.describe(scope=scope, identity=identity)
-            if info is None:
-                report.checks.append(CheckResult(
-                    f"lock_wecom_{app.get('name', '?')}",
-                    True,
-                    "info",
-                    f"{scope}/{identity} free",
-                ))
-            else:
-                report.checks.append(CheckResult(
-                    f"lock_wecom_{app.get('name', '?')}",
-                    False,
-                    "fatal",
-                    f"held by {info.owner} pid={info.pid} since {info.started_at}",
-                ))
+            _record(f"lock_wecom_{app.get('name', '?')}", scope, identity)
     if (platforms.get("weixin") or {}).get("enabled"):
         _account_id, bot_token = _weixin_credentials_for_lock(platforms["weixin"], data_dir)
         scope, identity = lock_identity_for_adapter(platform="weixin", bot_token=bot_token)
-        info = lock_manager.describe(scope=scope, identity=identity)
-        if info is None:
-            report.checks.append(CheckResult(
-                "lock_weixin", True, "info", f"{scope}/{identity} free",
-            ))
-        else:
-            report.checks.append(CheckResult(
-                "lock_weixin",
-                False,
-                "fatal",
-                f"held by {info.owner} pid={info.pid} since {info.started_at}",
-            ))
+        _record("lock_weixin", scope, identity)
 
 
 def _check_task_scheduler(report: DoctorReport) -> None:

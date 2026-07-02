@@ -18,7 +18,20 @@ Design notes:
 
 from __future__ import annotations
 
+import sys
+from pathlib import Path
 from typing import Any, Mapping
+
+
+def _default_python() -> str:
+    """Prefer a project-local venv if it actually exists; else the running
+    interpreter. Hard-coding ``.venv/Scripts/python.exe`` breaks service
+    install when the user never set up a venv (the venv python lacks the
+    project's deps and exits 1 immediately)."""
+    venv_py = Path(".venv/Scripts/python.exe") if sys.platform.startswith("win") else Path(".venv/bin/python")
+    if venv_py.exists():
+        return str(venv_py).replace("\\", "/")
+    return sys.executable.replace("\\", "/")
 
 try:
     import yaml  # type: ignore
@@ -133,12 +146,12 @@ def build_config_from_env(env: Mapping[str, str]) -> dict[str, Any]:
             "name": "mini-agent-gateway",
             "autostart": False,
             "start_on": "logon",
-            "python": ".venv/Scripts/python.exe",
+            "python": _default_python(),
             "cwd": ".",
             "args": ["gateway.py", "run", "--config", "gateway.yaml"],
             "log_file": _sub(data_dir, "logs", "service.log"),
             "status_file": _sub(data_dir, "status.json"),
-            "restart": {"enabled": True, "max_attempts": 5, "delay_seconds": 10},
+            "restart": {"enabled": True, "max_attempts": 5, "delay_seconds": 60},
         },
     }
     return config

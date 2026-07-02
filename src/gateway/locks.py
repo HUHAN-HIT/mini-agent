@@ -252,6 +252,24 @@ class PlatformLockManager:
             info = self._detect_hermes(scope, identity)
         return info
 
+    def cleanup_if_stale(self, *, scope: str, identity: str) -> Optional[LockInfo]:
+        """Remove a lock for ``(scope, identity)`` iff it is stale (owner PID
+        dead, or held longer than ``stale_after_seconds``). Returns the stale
+        ``LockInfo`` that was removed, or ``None`` if the lock is absent or
+        still live. Live locks are never stolen — only the doctor/CLI uses
+        this to recover from crashes that left orphaned lock files."""
+        if not identity or not self._enabled:
+            return None
+        path = self._lock_path(scope, identity)
+        info = self._read(path)
+        if info is None or not self._is_stale(info):
+            return None
+        try:
+            path.unlink()
+        except OSError:
+            pass
+        return info
+
     # ------------------------------------------------------------------
     # internal
     # ------------------------------------------------------------------

@@ -41,7 +41,7 @@ class ServiceSpec:
     config_path: str = ""
     start_on: str = "logon"  # logon | boot (boot needs admin)
     autostart: bool = False
-    restart: dict = field(default_factory=lambda: {"enabled": True, "max_attempts": 5, "delay_seconds": 10})
+    restart: dict = field(default_factory=lambda: {"enabled": True, "max_attempts": 5, "delay_seconds": 60})
 
     def command_line(self) -> str:
         parts = [self.python] + list(self.args)
@@ -148,7 +148,9 @@ class WindowsTaskSchedulerManager(ServiceManager):
         ]
         if restart_cfg.get("enabled"):
             attempts = int(restart_cfg.get("max_attempts", 5))
-            delay = int(restart_cfg.get("delay_seconds", 10))
+            # Task Scheduler enforces a 1-minute floor on RestartInterval;
+            # anything smaller (e.g. PT10S) is rejected with 0x80041318.
+            delay = max(60, int(restart_cfg.get("delay_seconds", 60)))
             settings_parts.append(f"-RestartCount {attempts}")
             settings_parts.append(f"-RestartInterval (New-TimeSpan -Seconds {delay})")
 
@@ -216,7 +218,7 @@ def spec_from_config(config: dict, config_path: Optional[Path] = None) -> Servic
         config_path=str(config_path) if config_path else "",
         start_on=service_cfg.get("start_on", "logon"),
         autostart=bool(service_cfg.get("autostart", False)),
-        restart=service_cfg.get("restart") or {"enabled": True, "max_attempts": 5, "delay_seconds": 10},
+        restart=service_cfg.get("restart") or {"enabled": True, "max_attempts": 5, "delay_seconds": 60},
     )
 
 
