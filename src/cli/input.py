@@ -6,8 +6,6 @@ import sys
 from pathlib import Path
 from typing import Optional
 
-_PROMPT = "mini-agent> "
-
 
 class InteractiveInput:
     """一行输入读取器。EOF→EOFError；中断→KeyboardInterrupt。"""

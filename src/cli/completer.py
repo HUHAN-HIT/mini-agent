@@ -8,7 +8,7 @@ from prompt_toolkit.completion import CompleteEvent, Completer, Completion
 from prompt_toolkit.document import Document
 from prompt_toolkit.formatted_text import FormattedText
 
-from src.cli.commands import SLASH_COMMANDS, Command, match_commands
+from src.cli.commands import match_commands
 
 
 def _primary_style() -> str:
@@ -26,8 +26,8 @@ def _primary_style() -> str:
 class SlashCompleter(Completer):
     """模糊匹配斜杠命令注册表。裸 / 列全部，/h 前缀过滤。"""
 
-    def __init__(self, commands: Iterable[Command] = SLASH_COMMANDS) -> None:
-        self._commands = tuple(commands)
+    def __init__(self) -> None:
+        pass
 
     def get_completions(self, document: Document,
                         complete_event: CompleteEvent) -> Iterable[Completion]:

@@ -10,7 +10,7 @@ from __future__ import annotations
 import threading
 import time
 from contextlib import contextmanager
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Iterator, Optional
 
 from rich.console import Console
@@ -38,7 +38,6 @@ class _SpinnerState:
     started_at: float
     paused: bool = False
     stopped: bool = False
-    extra: str = ""
 
 
 class ThinkingSpinner:
@@ -128,9 +127,7 @@ class ThinkingSpinner:
 
 @dataclass
 class _ToolCall:
-    name: str
     args: dict | str | None
-    started_at: float = field(default_factory=time.monotonic)
 
 
 class StreamRenderer:
@@ -173,12 +170,12 @@ class StreamRenderer:
                 self._block = ""
         elif event_type == "tool_call":
             self._active[data.get("tool", "?")] = _ToolCall(
-                name=data.get("tool", "?"), args=data.get("arguments"))
+                args=data.get("arguments"))
         elif event_type == "tool_result":
             self._finish_block()
             self._emit(self.format_tool_line(
                 data.get("tool", "?"),
-                self._active.pop(data.get("tool", "?"), _ToolCall("?", None)).args,
+                self._active.pop(data.get("tool", "?"), _ToolCall(None)).args,
                 data.get("status", "?"),
                 data.get("elapsed_ms", 0),
                 (data.get("preview") or "")[:120].replace("\n", " "),

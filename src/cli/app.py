@@ -103,10 +103,7 @@ def main() -> None:
     provider = os.getenv("LANGCHAIN_PROVIDER", "default")
     model = llm.model_name or os.getenv("LANGCHAIN_MODEL_NAME", "default")
 
-    try:
-        version = _read_version()
-    except Exception:  # noqa: BLE001
-        version = "0.1.0"
+    version = _read_version()
 
     reader = InteractiveInput(provider=provider, model=model, skills=len(skills))
     if reader.is_tty:
