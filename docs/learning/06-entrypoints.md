@@ -430,18 +430,18 @@ build-backend = "setuptools.build_meta"
 
 ### 6.3 entry_points（`pyproject.toml:34-35`）
 
+`[project.scripts]` 现在注册了三个命令：
+
 ```toml
 [project.scripts]
+mini-agent = "cli:main"          # 交互 CLI（薄 shim → src/cli/app.py）
 mini-agent-mcp = "mcp_server:main"
+mini-agent-gateway = "gateway:main"
 ```
 
-这一行让 `pip install -e .` 后，shell 里会出现一个 `mini-agent-mcp` 命令，等价于 `python mcp_server.py`。注意 **CLI 入口没有注册** —— `cli.py` 必须用 `python cli.py` 启动。如果你想让 `mini-agent` 也变成命令，加一行：
-
-```toml
-mini-agent = "cli:main"
-```
-
-（这是个小遗留点，可能是作者故意只把 MCP 注册成命令。）
+`mini-agent` 指向根 `cli.py` 的 `main`，而 `cli.py` 已改为薄 shim，真实交互实现在
+`src/cli/`（theme/banner/stream/input/completer/commands/onboard/app）。因此
+`uv tool install .` 后直接 `mini-agent` 即可启动美化终端，`python cli.py` 也仍可用。
 
 ### 6.4 开发安装
 

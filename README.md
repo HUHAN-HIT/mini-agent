@@ -16,29 +16,30 @@ A minimal, extensible ReAct agent framework. Includes MCP server, Skills system,
 ## Quick Start
 
 ```bash
-# 1. Install dependencies
-pip install -e .
+# 1. 安装依赖（uv 优先）
+uv sync
 
-# 2. Configure your LLM provider
-cp .env.example .env
-# Edit .env with your API key and provider
+# 2. 首次运行 —— 进入配置向导（选 provider / 填 model / 粘 API key，自动写 ~/.mini-agent/.env）
+uv run mini-agent
 
-# 3a. Run interactive CLI
-python cli.py
+# —— 或者装成全局命令 ——
+uv tool install .
+mini-agent
 
-# 3b. Run MCP server (for Claude Desktop, Cursor, etc.)
-python mcp_server.py
+# 3a. MCP server（Claude Desktop / Cursor 等）
+uv run mini-agent-mcp
 
-# 3c. Run MCP server with SSE transport
-python mcp_server.py --transport sse --port 8900
+# 3b. MCP server（SSE）
+uv run mini-agent-mcp --transport sse --port 8900
 
-# 3d. Run IM gateway (WeCom / WeChat)
-pip install -e ".[gateway]"
-# WeCom 在 .env 里填凭据；WeChat 推荐用 `gateway.py login weixin` 扫码。
-python gateway.py init            # 从 .env 自动生成 gateway.yaml
-python gateway.py doctor          # check config + env
-python gateway.py run             # foreground
+# 3c. IM 网关（企业微信 / 个人微信）
+uv sync --extra gateway
+uv run mini-agent-gateway init
+uv run mini-agent-gateway doctor
+uv run mini-agent-gateway run
 ```
+
+> 免安装直跑（开发调试）：`python cli.py` 仍可用。
 
 ## IM Gateway
 
